@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reddit Keyword Monitor</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Reddit Keyword Monitor</h1>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="keywordsView">Keywords</button>
+        <button class="nav-btn" data-view="activityView">Activity</button>
+        <button class="nav-btn" data-view="postsView">Posts</button>
+        <button class="nav-btn" data-view="repliesView">Replies</button>
+      </nav>
+      <div id="statusBar"></div>
+    </header>
+
+    <main>
+      <section id="keywordsView" class="card view active">
+        <h2>Keywords</h2>
+        <div class="inline-form">
+          <input id="newKeyword" type="text" placeholder="Add keyword (e.g., mlops)" />
+          <button id="addKeywordBtn">Add</button>
+        </div>
+        <ul id="keywordsList" class="kw-list"></ul>
+      </section>
+
+      <section id="activityView" class="card view">
+        <h2>Recent Activity</h2>
+        <div class="inline-form"><button id="refreshActivityBtn">Refresh</button></div>
+        <div id="activityList"></div>
+      </section>
+
+      <section id="filtersSection" class="card view">
+        <h2>Filters</h2>
+        <div class="filters">
+          <label>
+            Keyword
+            <select id="filterKeyword">
+              <option value="">All</option>
+            </select>
+          </label>
+          <label>
+            Subreddit
+            <input id="filterSubreddit" type="text" placeholder="e.g., MachineLearning" />
+          </label>
+          <label>
+            Kind
+            <select id="filterKind">
+              <option value="">Any</option>
+              <option value="post">Post</option>
+              <option value="comment">Comment</option>
+            </select>
+          </label>
+          <label>
+            From (UTC)
+            <input id="filterFrom" type="datetime-local" />
+          </label>
+          <label>
+            To (UTC)
+            <input id="filterTo" type="datetime-local" />
+          </label>
+          <div class="filter-actions">
+            <button id="applyFiltersBtn">Apply</button>
+            <button id="resetFiltersBtn" class="secondary">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="postsView" class="card view">
+        <h2>Posts</h2>
+        <div id="matchesList"></div>
+        <div class="pager">
+          <button id="prevPageBtn" class="secondary">Prev</button>
+          <span id="pageInfo">Page 1</span>
+          <button id="nextPageBtn">Next</button>
+        </div>
+      </section>
+
+      <section id="repliesView" class="card view">
+        <h2>Replies</h2>
+        <div id="repliesList"></div>
+        <div class="pager">
+          <button id="prevReplyBtn" class="secondary">Prev</button>
+          <span id="replyPageInfo">Page 1</span>
+          <button id="nextReplyBtn">Next</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="authModal" class="modal hidden">
+      <div class="modal-content">
+        <h3>API Login</h3>
+        <p>If the API requires authentication, enter credentials.</p>
+        <input id="apiUser" type="text" placeholder="Username" />
+        <input id="apiPass" type="password" placeholder="Password" />
+        <div class="modal-actions">
+          <button id="authSaveBtn">Save</button>
+          <button id="authCancelBtn" class="secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/ui/app.js"></script>
+  </body>
+  </html>
