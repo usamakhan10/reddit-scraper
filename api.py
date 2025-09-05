@@ -3,13 +3,15 @@ import time
 import sqlite3
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Query, status, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import main as monitor
+import io
+import csv
 import requests
 
 
@@ -239,30 +241,35 @@ def dashboard_keywords(db: sqlite3.Connection = Depends(get_db), _: Any = Depend
 @app.get("/dashboard/activity")
 def dashboard_activity(
     limit: int = Query(default=20, ge=1, le=100),
+    from_ts: Optional[int] = Query(default=None),
+    to_ts: Optional[int] = Query(default=None),
     db: sqlite3.Connection = Depends(get_db),
     _: Any = Depends(require_basic),
 ):
-    rows = db.execute(
-        """
-        SELECT 
-          m.id, m.reddit_id, m.reddit_url, m.subreddit, m.kind, m.title, m.body, m.created_at,
-          COALESCE(GROUP_CONCAT(k.keyword, ','), '') AS keywords,
-          COALESCE(rc.reply_count, 0) AS reply_count,
-          COALESCE(rc.last_reply_at, 0) AS last_reply_at
-        FROM matches m
-        LEFT JOIN match_keywords mk ON mk.match_id = m.id
-        LEFT JOIN keywords k ON k.id = mk.keyword_id
-        LEFT JOIN (
-          SELECT match_id, COUNT(*) AS reply_count, MAX(created_at) AS last_reply_at
-          FROM discord_replies_ext
-          GROUP BY match_id
-        ) rc ON rc.match_id = m.id
-        GROUP BY m.id
-        ORDER BY m.created_at DESC
-        LIMIT ?
-        """,
-        (limit,),
-    ).fetchall()
+    base = [
+        "SELECT m.id, m.reddit_id, m.reddit_url, m.subreddit, m.kind, m.title, m.body, m.created_at,",
+        "COALESCE(GROUP_CONCAT(k.keyword, ','), '') AS keywords,",
+        "COALESCE(rc.reply_count, 0) AS reply_count,",
+        "COALESCE(rc.last_reply_at, 0) AS last_reply_at",
+        "FROM matches m",
+        "LEFT JOIN match_keywords mk ON mk.match_id = m.id",
+        "LEFT JOIN keywords k ON k.id = mk.keyword_id",
+        "LEFT JOIN (SELECT match_id, COUNT(*) AS reply_count, MAX(created_at) AS last_reply_at FROM discord_replies_ext GROUP BY match_id) rc ON rc.match_id = m.id",
+    ]
+    where = []
+    params: List[Any] = []
+    if from_ts is not None:
+        where.append("m.created_at >= ?")
+        params.append(from_ts)
+    if to_ts is not None:
+        where.append("m.created_at <= ?")
+        params.append(to_ts)
+    if where:
+        base.append("WHERE " + " AND ".join(where))
+    base.append("GROUP BY m.id ORDER BY m.created_at DESC LIMIT ?")
+    params.append(limit)
+    sql = "\n".join(base)
+    rows = db.execute(sql, params).fetchall()
     items = []
     for r in rows:
         d = dict(r)
@@ -280,19 +287,35 @@ def list_posts(
     to_ts: Optional[int] = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    format: Optional[str] = Query(default=None),
+    all: Optional[bool] = Query(default=False),
     db: sqlite3.Connection = Depends(get_db),
     _: Any = Depends(require_basic),
 ):
     # Force kind='post' regardless of client input
     sql, params = _build_matches_query(keyword_id, keyword, subreddit, kind='post', from_ts=from_ts, to_ts=to_ts)
+    limit = size
     offset = (page - 1) * size
+    if all:
+        limit = 10000
+        offset = 0
     sql_paged = f"{sql} LIMIT ? OFFSET ?"
-    rows = db.execute(sql_paged, (*params, size, offset)).fetchall()
+    rows = db.execute(sql_paged, (*params, limit, offset)).fetchall()
     items = []
     for r in rows:
         d = dict(r)
         d["keywords"] = [k for k in (d.get("keywords") or "").split(",") if k]
         items.append(d)
+    if format and format.lower() == 'csv':
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["id","reddit_id","reddit_url","subreddit","kind","title","body","created_at","keywords"])
+        for it in items:
+            writer.writerow([
+                it.get("id"), it.get("reddit_id"), it.get("reddit_url"), it.get("subreddit"), it.get("kind"),
+                (it.get("title") or ""), (it.get("body") or ""), it.get("created_at"), ",".join(it.get("keywords") or []),
+            ])
+        return Response(content=buf.getvalue(), media_type='text/csv')
     return {"page": page, "size": size, "items": items}
 
 
@@ -306,6 +329,8 @@ def list_all_replies(
     reply_to_ts: Optional[int] = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    format: Optional[str] = Query(default=None),
+    all: Optional[bool] = Query(default=False),
     db: sqlite3.Connection = Depends(get_db),
     _: Any = Depends(require_basic),
 ):
@@ -352,14 +377,28 @@ def list_all_replies(
     base.append("ORDER BY dre.created_at DESC")
     sql = "\n".join(base)
 
+    limit = size
     offset = (page - 1) * size
+    if all:
+        limit = 10000
+        offset = 0
     sql_paged = f"{sql} LIMIT ? OFFSET ?"
-    rows = db.execute(sql_paged, (*params, size, offset)).fetchall()
+    rows = db.execute(sql_paged, (*params, limit, offset)).fetchall()
     items = []
     for r in rows:
         d = dict(r)
         d["keywords"] = [k for k in (d.get("keywords") or "").split(",") if k]
         items.append(d)
+    if format and format.lower() == 'csv':
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["reply_id","reply_url","author_name","author_id","reply_content","reply_created_at","match_id","reddit_id","reddit_url","subreddit","kind","title","body","match_created_at","keywords"])
+        for it in items:
+            writer.writerow([
+                it.get("reply_id"), it.get("reply_url"), it.get("author_name"), it.get("author_id"), (it.get("reply_content") or ""), it.get("reply_created_at"),
+                it.get("match_id"), it.get("reddit_id"), it.get("reddit_url"), it.get("subreddit"), it.get("kind"), (it.get("title") or ""), (it.get("body") or ""), it.get("match_created_at"), ",".join(it.get("keywords") or []),
+            ])
+        return Response(content=buf.getvalue(), media_type='text/csv')
     return {"page": page, "size": size, "items": items}
 
 
